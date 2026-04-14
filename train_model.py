@@ -3,7 +3,12 @@ from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
 import joblib
 from feature_extraction import extract_features
-
+from sklearn.ensemble import RandomForestClassifier
+model = RandomForestClassifier(
+    n_estimators=300,
+    max_depth=20,
+    random_state=42
+)
 # Load dataset
 data = pd.read_csv("phishing.csv")
 # Clean column names (VERY IMPORTANT)
@@ -22,7 +27,7 @@ y = labels
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2)
 
 # Train model
-model = RandomForestClassifier()
+model = RandomForestClassifier(n_estimators=200)
 model.fit(X_train, y_train)
 
 print("Accuracy:", model.score(X_test, y_test))
