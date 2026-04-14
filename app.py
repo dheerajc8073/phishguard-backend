@@ -4,6 +4,7 @@ from feature_extraction import extract_features
 from flask_cors import CORS
 import requests
 import os
+from urllib.parse import urlparse
 
 # 🔐 Load API key from environment
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
@@ -27,6 +28,9 @@ def home():
 # 🔍 Google Safe Browsing
 def check_google_safe_browsing(url):
     try:
+        if not GOOGLE_API_KEY:
+            return False
+
         api_url = f"https://safebrowsing.googleapis.com/v4/threatMatches:find?key={GOOGLE_API_KEY}"
 
         payload = {
@@ -48,11 +52,49 @@ def check_google_safe_browsing(url):
             return True
         return False
 
-    except:
+    except Exception:
         return False
 
 
-# 🔥 MAIN PREDICT API (FIXED LOGIC)
+# 🧠 Explain WHY (IMPROVED VERSION)
+def explain_features(url):
+    reasons = []
+
+    parsed = urlparse(url)
+    domain = parsed.netloc.lower()
+
+    # 🔴 Suspicious keyword
+    if any(word in url.lower() for word in ["login", "verify", "bank", "secure", "account"]):
+        reasons.append("Contains sensitive keywords (login/verify/bank)")
+
+    # 🔴 URL length
+    if len(url) > 75:
+        reasons.append("URL is unusually long")
+
+    # 🔴 @ symbol
+    if "@" in url:
+        reasons.append("Contains @ symbol (possible redirect attack)")
+
+    # 🔴 Too many hyphens
+    if domain.count("-") > 3:
+        reasons.append("Too many hyphens in domain")
+
+    # 🔴 HTTP not HTTPS
+    if url.startswith("http://"):
+        reasons.append("Not using secure HTTPS")
+
+    # 🔴 Too many dots (subdomains)
+    if domain.count(".") > 3:
+        reasons.append("Too many subdomains (suspicious structure)")
+
+    # 🟢 If no issues
+    if not reasons:
+        reasons.append("No obvious phishing patterns detected")
+
+    return reasons
+
+
+# 🔥 MAIN PREDICT API
 @app.route("/predict", methods=["POST"])
 def predict():
     try:
@@ -70,12 +112,12 @@ def predict():
         probs = model.predict_proba([features])[0]
 
         phishing_index = list(model.classes_).index(1)
-        prob = probs[phishing_index]  # 0 to 1
+        prob = probs[phishing_index]  # 0 → 1
 
         # 3️⃣ Google Safe Browsing
         google_flag = check_google_safe_browsing(url)
 
-        # 🔥 4️⃣ SMART DECISION LOGIC (FIXED)
+        # 🔥 4️⃣ SMART DECISION
         if google_flag:
             final_result = "Phishing"
         elif prob > 0.7:
@@ -83,14 +125,18 @@ def predict():
         else:
             final_result = "Safe"
 
-        # 🔥 5️⃣ REALISTIC RISK SCORE
+        # 🔥 5️⃣ Risk Score
         risk_score = round(prob * 100)
+
+        # 🔥 6️⃣ Explanation
+        reasons = explain_features(url)
 
         return jsonify({
             "result": final_result,
             "confidence": round(prob * 100, 2),
             "risk_score": risk_score,
-            "google_flag": google_flag
+            "google_flag": google_flag,
+            "reasons": reasons   # ✅ THIS WAS MISSING
         })
 
     except Exception as e:
