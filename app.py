@@ -20,19 +20,19 @@ def predict():
     url = data["url"]
 
     features = extract_features(url)
-prediction = model.predict([features])[0]
-probs = model.predict_proba([features])[0]
 
-# Find index of phishing class
-phishing_index = list(model.classes_).index(1)
+    prediction = model.predict([features])[0]
+    probs = model.predict_proba([features])[0]
 
-prob = probs[phishing_index]
+    # Correct probability
+    phishing_index = list(model.classes_).index(1)
+    prob = probs[phishing_index]
+
     return jsonify({
         "result": "Phishing" if prediction == 1 else "Safe",
         "confidence": round(prob * 100, 2)
     })
 
 
-# IMPORTANT for deployment
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
