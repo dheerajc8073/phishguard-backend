@@ -3,6 +3,9 @@ from urllib.parse import urlparse
 def extract_features(url):
     features = []
 
+features.append(len(url))
+features.append(url.count('.'))
+features.append("https" in url)
 features.append(url.count("//"))
 features.append(url.count("="))
 features.append(len(urlparse(url).path))
