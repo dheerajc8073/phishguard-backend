@@ -6,26 +6,15 @@ import requests
 import os
 from urllib.parse import urlparse
 
-# 🔐 Load API key from environment
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
 app = Flask(__name__)
 CORS(app)
 
-# Load ML model
 model = joblib.load("model.pkl")
 
 
-# ✅ Home route
-@app.route("/", methods=["GET"])
-def home():
-    return jsonify({
-        "status": "Backend Running 🚀",
-        "message": "Use /predict endpoint"
-    })
-
-
-# 🔍 Google Safe Browsing
+# 🔍 GOOGLE SAFE BROWSING
 def check_google_safe_browsing(url):
     try:
         if not GOOGLE_API_KEY:
@@ -34,10 +23,7 @@ def check_google_safe_browsing(url):
         api_url = f"https://safebrowsing.googleapis.com/v4/threatMatches:find?key={GOOGLE_API_KEY}"
 
         payload = {
-            "client": {
-                "clientId": "phishguard",
-                "clientVersion": "1.0"
-            },
+            "client": {"clientId": "phishguard", "clientVersion": "1.0"},
             "threatInfo": {
                 "threatTypes": ["MALWARE", "SOCIAL_ENGINEERING"],
                 "platformTypes": ["ANY_PLATFORM"],
@@ -46,103 +32,134 @@ def check_google_safe_browsing(url):
             }
         }
 
-        response = requests.post(api_url, json=payload, timeout=3)
+        res = requests.post(api_url, json=payload, timeout=3)
+        return res.status_code == 200 and res.json()
 
-        if response.status_code == 200 and response.json():
-            return True
-        return False
-
-    except Exception:
+    except:
         return False
 
 
-# 🧠 Explain WHY (IMPROVED VERSION)
-def explain_features(url):
+# 🔥 BRAND PHISHING DETECTION
+def detect_brand_phishing(url):
+    domain = urlparse(url).netloc.lower()
+
+    brands = [
+        "amazon", "google", "facebook", "paypal",
+        "instagram", "netflix", "bank", "sbi",
+        "hdfc", "icici", "axis", "flipkart"
+    ]
+
+    for brand in brands:
+        if brand in domain:
+            if not domain.endswith(f"{brand}.com"):
+                return True
+
+    return False
+
+
+# 🔥 SUSPICIOUS DOMAIN DETECTION
+def detect_suspicious_domain(url):
+    domain = urlparse(url).netloc.lower()
+
+    # Too long domain
+    if len(domain) > 25:
+        return True
+
+    # Too many dots
+    if domain.count('.') > 3:
+        return True
+
+    # Random characters pattern
+    if any(char.isdigit() for char in domain) and len(domain) > 15:
+        return True
+
+    return False
+
+
+# 🔥 EXPLANATION ENGINE
+def explain(url):
     reasons = []
 
-    parsed = urlparse(url)
-    domain = parsed.netloc.lower()
-
-    # 🔴 Suspicious keyword
-    if any(word in url.lower() for word in ["login", "verify", "bank", "secure", "account"]):
-        reasons.append("Contains sensitive keywords (login/verify/bank)")
-
-    # 🔴 URL length
-    if len(url) > 75:
-        reasons.append("URL is unusually long")
-
-    # 🔴 @ symbol
-    if "@" in url:
-        reasons.append("Contains @ symbol (possible redirect attack)")
-
-    # 🔴 Too many hyphens
-    if domain.count("-") > 3:
-        reasons.append("Too many hyphens in domain")
-
-    # 🔴 HTTP not HTTPS
+    if "login" in url:
+        reasons.append("Contains login keyword")
+    if "verify" in url:
+        reasons.append("Contains verification keyword")
+    if "secure" in url:
+        reasons.append("Contains misleading 'secure'")
     if url.startswith("http://"):
-        reasons.append("Not using secure HTTPS")
+        reasons.append("Not using HTTPS")
+    if "@" in url:
+        reasons.append("Contains @ symbol")
+    if len(url) > 75:
+        reasons.append("URL is too long")
 
-    # 🔴 Too many dots (subdomains)
-    if domain.count(".") > 3:
-        reasons.append("Too many subdomains (suspicious structure)")
-
-    # 🟢 If no issues
     if not reasons:
-        reasons.append("No obvious phishing patterns detected")
+        reasons.append("No obvious phishing patterns")
 
     return reasons
 
 
-# 🔥 MAIN PREDICT API
+# 🚀 MAIN API
 @app.route("/predict", methods=["POST"])
 def predict():
-    try:
-        data = request.get_json()
-        url = data.get("url")
+    data = request.get_json()
+    url = data.get("url")
 
-        if not url:
-            return jsonify({"error": "No URL provided"}), 400
+    if not url:
+        return jsonify({"error": "No URL"}), 400
 
-        # 1️⃣ Feature extraction
-        features = extract_features(url)
+    # ML
+    features = extract_features(url)
+    pred = model.predict([features])[0]
+    probs = model.predict_proba([features])[0]
 
-        # 2️⃣ ML prediction
-        prediction = model.predict([features])[0]
-        probs = model.predict_proba([features])[0]
+    idx = list(model.classes_).index(1)
+    prob = probs[idx]
 
-        phishing_index = list(model.classes_).index(1)
-        prob = probs[phishing_index]  # 0 → 1
+    # Extra checks
+    google_flag = check_google_safe_browsing(url)
+    brand_flag = detect_brand_phishing(url)
+    suspicious_flag = detect_suspicious_domain(url)
 
-        # 3️⃣ Google Safe Browsing
-        google_flag = check_google_safe_browsing(url)
+    # 🔥 FINAL DECISION ENGINE
+    if google_flag:
+        result = "Phishing"
+    elif brand_flag:
+        result = "Phishing"
+    elif suspicious_flag:
+        result = "Phishing"
+    elif prob > 0.7:
+        result = "Phishing"
+    else:
+        result = "Safe"
 
-        # 🔥 4️⃣ SMART DECISION
-        if google_flag:
-            final_result = "Phishing"
-        elif prob > 0.7:
-            final_result = "Phishing"
-        else:
-            final_result = "Safe"
+    # 🔥 RISK SCORE (SMART)
+    risk = round(prob * 100)
 
-        # 🔥 5️⃣ Risk Score
-        risk_score = round(prob * 100)
+    if google_flag:
+        risk = max(risk, 90)
+    if brand_flag:
+        risk = max(risk, 80)
+    if suspicious_flag:
+        risk = max(risk, 70)
 
-        # 🔥 6️⃣ Explanation
-        reasons = explain_features(url)
+    confidence = max(prob * 100, 5)
 
-        return jsonify({
-            "result": final_result,
-            "confidence": round(prob * 100, 2),
-            "risk_score": risk_score,
-            "google_flag": google_flag,
-            "reasons": reasons   # ✅ THIS WAS MISSING
-        })
-
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    return jsonify({
+        "result": result,
+        "confidence": round(confidence, 2),
+        "risk_score": risk,
+        "google_flag": google_flag,
+        "brand_flag": brand_flag,
+        "suspicious_flag": suspicious_flag,
+        "reasons": explain(url)
+    })
 
 
-# Run locally
+@app.route("/")
+def home():
+    return "PhishGuard Backend Running 🚀"
+
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
