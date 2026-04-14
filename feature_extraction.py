@@ -3,11 +3,10 @@ from urllib.parse import urlparse
 def extract_features(url):
     features = []
 
-    features.append(len(url))  # URL length
-    features.append(url.count('.'))  # dots
-    features.append(1 if "https" in url else 0)
-    features.append(1 if "@" in url else 0)
-    features.append(1 if "-" in url else 0)
+features.append(url.count("//"))
+features.append(url.count("="))
+features.append(len(urlparse(url).path))
+features.append(1 if url.startswith("http://") else 0)
 
     domain = urlparse(url).netloc
     features.append(domain.count('.'))
