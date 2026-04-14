@@ -5,19 +5,21 @@ from flask_cors import CORS
 import requests
 import os
 from urllib.parse import urlparse
-
-# 🔐 API KEY (from Render env)
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+import whois
+from datetime import datetime
+import ssl
+import socket
 
 app = Flask(__name__)
 CORS(app)
 
-# ✅ Load model
 model = joblib.load("model.pkl")
 
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
-# 🔍 GOOGLE SAFE BROWSING
-def check_google_safe_browsing(url):
+
+# 🔍 GOOGLE CHECK
+def check_google(url):
     try:
         if not GOOGLE_API_KEY:
             return False
@@ -25,10 +27,7 @@ def check_google_safe_browsing(url):
         api_url = f"https://safebrowsing.googleapis.com/v4/threatMatches:find?key={GOOGLE_API_KEY}"
 
         payload = {
-            "client": {
-                "clientId": "phishguard",
-                "clientVersion": "1.0"
-            },
+            "client": {"clientId": "phishguard", "clientVersion": "1.0"},
             "threatInfo": {
                 "threatTypes": ["MALWARE", "SOCIAL_ENGINEERING"],
                 "platformTypes": ["ANY_PLATFORM"],
@@ -37,157 +36,86 @@ def check_google_safe_browsing(url):
             }
         }
 
-        res = requests.post(api_url, json=payload, timeout=3)
+        res = requests.post(api_url, json=payload)
+        data = res.json()
 
-        return res.status_code == 200 and res.json()
+        return "matches" in data
 
     except:
         return False
 
 
-# 🔥 BRAND PHISHING DETECTION
-def detect_brand_phishing(url):
-    domain = urlparse(url).netloc.lower()
+# 🌐 DOMAIN AGE
+def get_domain_age(url):
+    try:
+        domain = urlparse(url).netloc
+        w = whois.whois(domain)
 
-    brands = [
-        "amazon", "google", "facebook", "paypal",
-        "instagram", "netflix", "bank", "sbi",
-        "hdfc", "icici", "axis", "flipkart"
-    ]
+        creation_date = w.creation_date
+        if isinstance(creation_date, list):
+            creation_date = creation_date[0]
 
-    for brand in brands:
-        if brand in domain:
-            if not domain.endswith(f"{brand}.com"):
-                return True
+        age = (datetime.now() - creation_date).days
+        return age
 
-    return False
-
-
-# 🔥 SUSPICIOUS DOMAIN DETECTION
-def detect_suspicious_domain(url):
-    domain = urlparse(url).netloc.lower()
-
-    if len(domain) > 25:
-        return True
-
-    if domain.count('.') > 3:
-        return True
-
-    if any(char.isdigit() for char in domain) and len(domain) > 15:
-        return True
-
-    return False
+    except:
+        return -1
 
 
-# 🔍 EXPLANATION ENGINE
-def explain(url):
-    reasons = []
-
-    if "login" in url.lower():
-        reasons.append("Contains login keyword")
-
-    if "verify" in url.lower():
-        reasons.append("Contains verification keyword")
-
-    if "secure" in url.lower():
-        reasons.append("Uses misleading 'secure' term")
-
-    if url.startswith("http://"):
-        reasons.append("Not using HTTPS")
-
-    if "@" in url:
-        reasons.append("Contains @ symbol (redirect trick)")
-
-    if len(url) > 75:
-        reasons.append("URL is too long")
-
-    if not reasons:
-        reasons.append("No obvious phishing patterns")
-
-    return reasons
+# 🔒 SSL CHECK
+def check_ssl(domain):
+    try:
+        ctx = ssl.create_default_context()
+        with ctx.wrap_socket(socket.socket(), server_hostname=domain) as s:
+            s.settimeout(3)
+            s.connect((domain, 443))
+            return True
+    except:
+        return False
 
 
-# 🏠 HOME
-@app.route("/", methods=["GET"])
-def home():
+# 🚀 API
+@app.route("/predict", methods=["POST"])
+def predict():
+    data = request.get_json()
+    url = data.get("url")
+
+    if not url:
+        return jsonify({"error": "No URL"}), 400
+
+    # ML
+    features = extract_features(url)
+    prob = model.predict_proba([features])[0][1]
+
+    # Extra checks
+    google_flag = check_google(url)
+    domain = urlparse(url).netloc
+    ssl_flag = check_ssl(domain)
+    domain_age = get_domain_age(url)
+
+    # 🧠 SCORING ENGINE
+    score = prob * 100 * 0.5
+
+    if google_flag:
+        score += 30
+
+    if not ssl_flag:
+        score += 20
+
+    if domain_age != -1 and domain_age < 30:
+        score += 30
+
+    result = "Phishing" if score > 60 else "Safe"
+
     return jsonify({
-        "status": "Backend Running 🚀",
-        "message": "Use POST /predict"
+        "result": result,
+        "confidence": round(prob * 100, 2),
+        "risk_score": int(score),
+        "google_flag": google_flag,
+        "ssl": ssl_flag,
+        "domain_age": domain_age
     })
 
 
-# 🚀 MAIN PREDICT API
-@app.route("/predict", methods=["POST"])
-def predict():
-    try:
-        data = request.get_json()
-        url = data.get("url")
-
-        if not url:
-            return jsonify({"error": "No URL provided"}), 400
-
-        # 🔹 Extract features
-        features = extract_features(url)
-
-        # 🔹 ML prediction
-        prediction = model.predict([features])[0]
-        probs = model.predict_proba([features])[0]
-
-        phishing_index = list(model.classes_).index(1)
-        prob = probs[phishing_index]
-
-        # 🔹 Extra checks
-        google_flag = check_google_safe_browsing(url)
-        brand_flag = detect_brand_phishing(url)
-        suspicious_flag = detect_suspicious_domain(url)
-
-        # 🔥 FINAL DECISION ENGINE (FIXED)
-        if google_flag:
-            result = "Phishing"
-        elif brand_flag:
-            result = "Phishing"
-        elif suspicious_flag:
-            result = "Phishing"
-        elif prob > 0.6:
-            result = "Phishing"
-        else:
-            result = "Safe"
-
-        # 🔥 RISK SCORE
-        risk = round(prob * 100)
-
-        if google_flag:
-            risk = max(risk, 90)
-
-        if brand_flag:
-            risk = max(risk, 80)
-
-        if suspicious_flag:
-            risk = max(risk, 70)
-
-        if result == "Phishing":
-            risk = max(risk, 70)
-
-        # 🔥 CONFIDENCE FIX
-        confidence = max(prob * 100, 5)
-
-        # 🔍 EXPLANATION
-        reasons = explain(url)
-
-        return jsonify({
-            "result": result,
-            "confidence": round(confidence, 2),
-            "risk_score": risk,
-            "google_flag": google_flag,
-            "brand_flag": brand_flag,
-            "suspicious_flag": suspicious_flag,
-            "reasons": reasons
-        })
-
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
-# 🚀 RUN
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+    app.run(debug=True)

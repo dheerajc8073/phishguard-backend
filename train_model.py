@@ -1,11 +1,11 @@
 import pandas as pd
 from sklearn.model_selection import train_test_split
-from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import classification_report
+from xgboost import XGBClassifier
 import joblib
 from feature_extraction import extract_features
 
-# Load
+# Load dataset
 data = pd.read_csv("phishing.csv")
 data.columns = data.columns.str.strip().str.lower()
 
@@ -24,20 +24,22 @@ X_train, X_test, y_train, y_test = train_test_split(
     stratify=y
 )
 
-# 🔥 BETTER MODEL (LESS OVERFIT)
-model = RandomForestClassifier(
-    n_estimators=200,
-    max_depth=15,
-    min_samples_split=5,
-    min_samples_leaf=3,
-    class_weight="balanced",
-    random_state=42
+# 🔥 XGBoost Model
+model = XGBClassifier(
+    n_estimators=300,
+    max_depth=8,
+    learning_rate=0.05,
+    subsample=0.8,
+    colsample_bytree=0.8,
+    eval_metric="logloss"
 )
 
 model.fit(X_train, y_train)
 
+# Evaluate
 print("Accuracy:", model.score(X_test, y_test))
 print(classification_report(y_test, model.predict(X_test)))
 
+# Save model
 joblib.dump(model, "model.pkl")
 print("✅ Model saved")
