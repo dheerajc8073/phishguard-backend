@@ -24,7 +24,6 @@ def predict():
     prediction = model.predict([features])[0]
     probs = model.predict_proba([features])[0]
 
-    # Correct probability
     phishing_index = list(model.classes_).index(1)
     prob = probs[phishing_index]
 
