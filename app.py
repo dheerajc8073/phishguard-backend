@@ -15,7 +15,7 @@ CORS(app)
 model = joblib.load("model.pkl")
 
 
-# ✅ Home route (fixes 404 issue)
+# ✅ Home route
 @app.route("/", methods=["GET"])
 def home():
     return jsonify({
@@ -24,7 +24,7 @@ def home():
     })
 
 
-# 🔍 Google Safe Browsing Check
+# 🔍 Google Safe Browsing
 def check_google_safe_browsing(url):
     try:
         api_url = f"https://safebrowsing.googleapis.com/v4/threatMatches:find?key={GOOGLE_API_KEY}"
@@ -48,11 +48,11 @@ def check_google_safe_browsing(url):
             return True
         return False
 
-    except Exception:
-        return False  # Fail-safe
+    except:
+        return False
 
 
-# 🔥 Main prediction API
+# 🔥 MAIN PREDICT API (FIXED LOGIC)
 @app.route("/predict", methods=["POST"])
 def predict():
     try:
@@ -70,18 +70,26 @@ def predict():
         probs = model.predict_proba([features])[0]
 
         phishing_index = list(model.classes_).index(1)
-        prob = probs[phishing_index]
+        prob = probs[phishing_index]  # 0 to 1
 
         # 3️⃣ Google Safe Browsing
         google_flag = check_google_safe_browsing(url)
 
-        # 4️⃣ Final decision (Hybrid system)
-        final_result = "Phishing" if (
-            prediction == 1 or google_flag) else "Safe"
+        # 🔥 4️⃣ SMART DECISION LOGIC (FIXED)
+        if google_flag:
+            final_result = "Phishing"
+        elif prob > 0.7:
+            final_result = "Phishing"
+        else:
+            final_result = "Safe"
+
+        # 🔥 5️⃣ REALISTIC RISK SCORE
+        risk_score = round(prob * 100)
 
         return jsonify({
             "result": final_result,
             "confidence": round(prob * 100, 2),
+            "risk_score": risk_score,
             "google_flag": google_flag
         })
 
