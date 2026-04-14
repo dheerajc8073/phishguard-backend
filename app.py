@@ -1,24 +1,22 @@
 from flask import Flask, request, jsonify
+from flask_cors import CORS
 import joblib
 from feature_extraction import extract_features
-from flask_cors import CORS
 import requests
 import os
 from urllib.parse import urlparse
-import whois
-from datetime import datetime
 import ssl
 import socket
 
 app = Flask(__name__)
-CORS(app)
+CORS(app, resources={r"/*": {"origins": "*"}})
 
 model = joblib.load("model.pkl")
 
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
 
-# 🔍 GOOGLE CHECK
+# 🔍 GOOGLE CHECK (SAFE)
 def check_google(url):
     try:
         if not GOOGLE_API_KEY:
@@ -36,30 +34,13 @@ def check_google(url):
             }
         }
 
-        res = requests.post(api_url, json=payload)
+        res = requests.post(api_url, json=payload, timeout=3)
         data = res.json()
 
         return "matches" in data
 
     except:
         return False
-
-
-# 🌐 DOMAIN AGE
-def get_domain_age(url):
-    try:
-        domain = urlparse(url).netloc
-        w = whois.whois(domain)
-
-        creation_date = w.creation_date
-        if isinstance(creation_date, list):
-            creation_date = creation_date[0]
-
-        age = (datetime.now() - creation_date).days
-        return age
-
-    except:
-        return -1
 
 
 # 🔒 SSL CHECK
@@ -74,47 +55,66 @@ def check_ssl(domain):
         return False
 
 
-# 🚀 API
+@app.route("/")
+def home():
+    return "PhishGuard Backend Running ✅"
+
+
+# 🚀 MAIN API
 @app.route("/predict", methods=["POST"])
 def predict():
-    data = request.get_json()
-    url = data.get("url")
+    try:
+        data = request.get_json()
+        url = data.get("url")
 
-    if not url:
-        return jsonify({"error": "No URL"}), 400
+        if not url:
+            return jsonify({"error": "No URL"}), 400
 
-    # ML
-    features = extract_features(url)
-    prob = model.predict_proba([features])[0][1]
+        # ML
+        features = extract_features(url)
+        prob = float(model.predict_proba([features])[0][1])
 
-    # Extra checks
-    google_flag = check_google(url)
-    domain = urlparse(url).netloc
-    ssl_flag = check_ssl(domain)
-    domain_age = get_domain_age(url)
+        # SAFE DEFAULTS
+        google_flag = False
+        ssl_flag = False
+        domain_age = -1
 
-    # 🧠 SCORING ENGINE
-    score = prob * 100 * 0.5
+        try:
+            google_flag = check_google(url)
+        except:
+            pass
 
-    if google_flag:
-        score += 30
+        try:
+            domain = urlparse(url).netloc
+            ssl_flag = check_ssl(domain)
+        except:
+            pass
 
-    if not ssl_flag:
-        score += 20
+        # SCORE
+        score = prob * 100 * 0.5
 
-    if domain_age != -1 and domain_age < 30:
-        score += 30
+        if google_flag:
+            score += 30
 
-    result = "Phishing" if score > 60 else "Safe"
+        if not ssl_flag:
+            score += 20
 
-    return jsonify({
-        "result": result,
-        "confidence": round(prob * 100, 2),
-        "risk_score": int(score),
-        "google_flag": google_flag,
-        "ssl": ssl_flag,
-        "domain_age": domain_age
-    })
+        result = "Phishing" if score > 60 else "Safe"
+
+        return jsonify({
+            "result": result,
+            "confidence": float(round(prob * 100, 2)),
+            "risk_score": int(score),
+            "google_flag": bool(google_flag),
+            "ssl": bool(ssl_flag),
+            "domain_age": int(domain_age)
+        })
+
+    except Exception as e:
+        return jsonify({
+            "error": "Server error",
+            "details": str(e)
+        }), 500
 
 
 if __name__ == "__main__":
